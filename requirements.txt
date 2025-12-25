@@ -1,0 +1,16 @@
+langchain
+langgraph
+langchain-openai
+chromadb
+pytesseract
+pdf2image
+beautifulsoup4
+requests
+streamlit
+python-dotenv
+langchain-core>=0.2.0
+langchain-community>=0.2.0
+langchain-text-splitters>=0.2.0
+pypdf>=4.0.0
+langchain-ollama>=0.2.
+langchain_chroma
