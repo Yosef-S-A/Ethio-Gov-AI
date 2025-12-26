@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+@import "@daveyplate/better-auth-ui/css";
 
 :root {
   --background: oklch(1 0 0);

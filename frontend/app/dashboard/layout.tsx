@@ -1,29 +1,16 @@
-"use client";
-
 import type React from "react";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { BookOpen, Gavel } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { RedirectToSignIn } from "@daveyplate/better-auth-ui";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-
-  useEffect(() => {
-    // Check authentication
-    const token = localStorage.getItem("auth-token");
-    if (!token) {
-      router.push("/auth/sign-in");
-    }
-  }, [router]);
-
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen bg-background w-full">
+      <RedirectToSignIn />
       <Sidebar />
 
       {/* Main Content */}
