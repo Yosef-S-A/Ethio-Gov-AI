@@ -37,7 +37,6 @@ faiss_index.bin
 *.pickle
 *.bin
 embeddings/
-db/
 .vscode/
 __pycache__/
 *.db
