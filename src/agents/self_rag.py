@@ -5,6 +5,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langgraph.graph import END, StateGraph, START
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 import sys
 import os
@@ -17,9 +18,10 @@ from processing.vector_store import load_local_db
 
 # 1. Define the Graph State
 class GraphState(TypedDict):
-    """Represents the state of our legal assistant."""
     question: str
     generation: str
+    summary: str
+    history: List[any]
     documents: List[str]
 
 # 2. Define Structured Output Models for Grading
@@ -39,6 +41,55 @@ def retrieve(state):
     # Retrieve top 3 relevant chunks
     documents = db.similarity_search(question, k=10)
     return {"documents": documents, "question": question}
+
+def summarize_history(state):
+    print("---SUMMARIZING OLD CONVERSATION---")
+    history = state.get("history", [])
+    summary = state.get("summary", "")
+    
+    # We only summarize if history is getting long
+    if len(history) <= 6:
+        return {"history": history, "summary": summary}
+
+    llm = ChatOllama(model="llama3.2", temperature=0)
+    
+    # Take the oldest 4 messages to summarize, keep the latest 2 for immediate context
+    to_summarize = history[:-2]
+    remaining_history = history[-2:]
+
+    prompt = f"""
+    You are the Senior Clerk for EthioGov AI. 
+    Current Summary: {summary}
+    New Messages to condense: {to_summarize}
+    
+    Update the summary to include the key legal topics and user intents 
+    discussed in the new messages. Keep it professional and concise.
+    Updated Summary:"""
+
+    new_summary = llm.invoke(prompt).content
+    
+    # Return the new summary and the pruned history
+    return {"summary": new_summary, "history": remaining_history}
+
+def contextualize_question(state):
+    print("---REWRITING QUESTION FOR SEARCH---")
+    question = state["question"]
+    history = state["history"]
+    
+    if not history:
+        return {"question": question} # No history, no need to rewrite
+
+    llm = ChatOllama(model="llama3.2", temperature=0)
+    
+    # Prompt to turn a follow-up into a standalone question
+    context_prompt = f"""Given the chat history and the latest user question, 
+    rephrase the question to be a standalone search query. 
+    History: {history}
+    Follow-up: {question}
+    Standalone Question:"""
+    
+    standalone_q = llm.invoke(context_prompt).content
+    return {"question": standalone_q}
 
 def generate(state):
     print("---GENERATING POLISHED LEGAL ANSWER---")
@@ -115,13 +166,17 @@ def grade_documents(state):
 workflow = StateGraph(GraphState)
 
 # Add Nodes
+workflow.add_node("contextualize", contextualize_question)
 workflow.add_node("retrieve", retrieve)
 workflow.add_node("generate", generate)
+workflow.add_node("summarize", summarize_history)
 
 # Define Flow
-workflow.add_edge(START, "retrieve")
-
+workflow.add_edge(START, "contextualize")
+workflow.add_edge("contextualize", "retrieve")
 workflow.add_edge("retrieve", "generate")
+workflow.add_edge("generate", "summarize")
+
 # Add Conditional Logic: Only generate if documents are relevant
 workflow.add_conditional_edges(
     "retrieve",
@@ -137,6 +192,7 @@ workflow.add_conditional_edges(
 # )
 
 workflow.add_edge("generate", END)
+
 
 # Compile the Brain
 app = workflow.compile()
