@@ -6,32 +6,33 @@ RAW_DATA_PATH = "data/raw/"
 INTERIM_DATA_PATH = "data/interim/"
 
 def chunk_legal_docs():
-    # 1. Setup the splitters
-    # Child chunks (small, for high-accuracy vector search)
-    child_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
-    
-    # Parent chunks (larger, to provide context to the LLM)
-    # parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+    # 1. Use larger chunks and smart separators
+    # We add "Article" and "አንቀጽ" as separators so it tries to split at Article boundaries first.
+    child_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,        # Increased from 400 for better "Article" context
+        chunk_overlap=150,      # Increased overlap to bridge connected sub-articles
+        separators=["\n\n", "\n", "Article", "አንቀጽ", " ", ""] 
+    )
 
     all_docs = []
     
     for file_name in os.listdir(RAW_DATA_PATH):
         if file_name.endswith(".pdf"):
-            print(f"Processing: {file_name}")
             loader = PyPDFLoader(os.path.join(RAW_DATA_PATH, file_name))
-            
-            # Load and add metadata (Sovereign Data principle)
             docs = loader.load()
-            for doc in docs:
-                doc.metadata["source_file"] = file_name
-                # Extract Proclamation number if in filename (e.g. Proc_1234.pdf)
-                doc.metadata["law_id"] = file_name.split('.')[0]
             
-            # Split into child chunks
+            # Enrich metadata and page content
+            for doc in docs:
+                law_id = file_name.replace(".pdf", "")
+                # Metadata helps filtering; putting it in text helps search
+                doc.page_content = f"Law ID: {law_id} | Page: {doc.metadata.get('page')} \n {doc.page_content}"
+                doc.metadata["law_id"] = law_id
+                doc.metadata["source_file"] = file_name
+            
             chunks = child_splitter.split_documents(docs)
             all_docs.extend(chunks)
             
-    print(f"Generated {len(all_docs)} searchable chunks.")
+    print(f"Generated {len(all_docs)} high-context chunks.")
     return all_docs
 
 if __name__ == "__main__":

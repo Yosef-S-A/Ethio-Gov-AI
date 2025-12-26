@@ -37,25 +37,40 @@ def retrieve(state):
     db = load_local_db()
     
     # Retrieve top 3 relevant chunks
-    documents = db.similarity_search(question, k=3)
+    documents = db.similarity_search(question, k=10)
     return {"documents": documents, "question": question}
 
 def generate(state):
-    print("---GENERATING RESPONSE---")
+    print("---GENERATING POLISHED LEGAL ANSWER---")
     question = state["question"]
     documents = state["documents"]
     
-    # Local Llama 3.2 via Ollama
-    llm = ChatOllama(model="llama3.2", temperature=0)
+    llm = ChatOllama(model="llama3.2", temperature=0, num_predict=2048,
+        num_ctx=8192)
     
+    # Improved Prompt: Personas and Clear Formatting
     prompt = ChatPromptTemplate.from_template(
-        """You are an Ethiopian Legal Assistant. Use ONLY the following legal context to answer.
-        If the answer isn't in the context, say you don't know. 
-        Always cite the 'source_file' from the metadata.
-        
-        Context: {context}
-        Question: {question}
-        Answer:"""
+        """You are the 'EthioGov AI' Senior Legal Consultant. Your objective is to provide 
+        high-integrity, business-ready legal compliance summaries for investors and 
+        government officials based ONLY on the provided context that includes the related proclamations with the proclamation number and title. 
+
+        CRITICAL BUSINESS RULES:
+        1. AUTHORITY FIRST: Begin EVERY response with: "Per Proclamation No., Article [X]:"
+        2. STRICT NO-HALLUCINATION: If context lacks specific answer, respond EXACTLY: "⚠️ The indexed Ethiopian legal corpus does not contain this provision. Consult Federal Negarit Gazeta - www.negarigazeta.gov.et"
+        3. EXECUTIVE FORMAT:
+            • **Legal Rule**: Direct quote + Law ID
+            • **Implementation**: 3-step compliance process
+            • **Business Impact**: Single-sentence risk/opportunity summary
+        4. PRECISION CITATION: Every claim ends with "[Proc. XXXX/YYYY, Art. X]"
+        5. TONE: Authoritative consultant speaking to C-suite / government officials
+
+        CONTEXT:
+        {context}
+
+        QUERY:
+        {question}
+
+        PROFESSIONAL LEGAL SUMMARY:"""
     )
     
     rag_chain = prompt | llm | StrOutputParser()
@@ -71,12 +86,13 @@ def grade_documents(state):
     llm = ChatOllama(model="llama3.2", format="json", temperature=0)
     
     prompt = ChatPromptTemplate.from_template(
-        """You are a grader assessing relevance of a retrieved document to a user question. 
-        If the document contains keywords or semantic meaning related to the question, grade it as 'yes'.
-        Give a binary score 'yes' or 'no' as a JSON with a single key 'score'.
+        """You are a grader checking if a document is useful to answer a question.
+        If the document has ANY keywords related to the question, respond with 'yes'.
+        Otherwise, respond 'no'.
+        Respond ONLY in JSON format: {{"score": "yes"}} or {{"score": "no"}}
         
-        Retrieved Document: {document}
-        User Question: {question}"""
+        Document: {document}
+        Question: {question}"""
     )
     
     retrieval_grader = prompt | llm | JsonOutputParser()
@@ -84,6 +100,9 @@ def grade_documents(state):
     # Grade the first document for simplicity in this MVP
     score = retrieval_grader.invoke({"question": question, "document": documents[0].page_content})
     grade = score['score']
+    
+    # Inside grade_documents(state):
+    print(f"--- DEBUG: Grader Score result: {score} ---")
     
     if grade == "yes":
         print("---DECISION: DOCUMENT RELEVANT---")
@@ -102,6 +121,7 @@ workflow.add_node("generate", generate)
 # Define Flow
 workflow.add_edge(START, "retrieve")
 
+workflow.add_edge("retrieve", "generate")
 # Add Conditional Logic: Only generate if documents are relevant
 workflow.add_conditional_edges(
     "retrieve",
@@ -111,6 +131,10 @@ workflow.add_conditional_edges(
         "not_relevant": END, # In a full version, this could trigger a 'web_search' or 'rewrite'
     },
 )
+#         "generate": "generate",
+#         "not_relevant": END, # In a full version, this could trigger a 'web_search' or 'rewrite'
+#     },
+# )
 
 workflow.add_edge("generate", END)
 
@@ -121,7 +145,7 @@ app = workflow.compile()
 if __name__ == "__main__":
     print("\n--- Testing EthioGov AI (Local Self-RAG) ---")
     # Change this to a question relevant to your 10 PDFs
-    test_question = "What are the rules for foreign investment in the telecommunications sector?"
+    test_question = "Summarize the main differences between a Joint Venture and a Sole Investment for a tech startup."
     
     inputs = {"question": test_question}
     for output in app.stream(inputs):
@@ -130,5 +154,5 @@ if __name__ == "__main__":
     
     # Final Result
     final_state = app.invoke(inputs)
-    print("\n--- FINAL RESPONSE ---", final_state)
+    # print("\n--- FINAL RESPONSE ---", final_state)
     print("\nFINAL ANSWER:\n", final_state["generation"])
