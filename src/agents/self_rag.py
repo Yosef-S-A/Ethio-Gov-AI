@@ -40,61 +40,65 @@ def retrieve(state):
     
     # Retrieve top 3 relevant chunks
     documents = db.similarity_search(question, k=10)
-    return {"documents": documents, "question": question}
+    return {"documents": documents, "question": question} 
 
 def summarize_history(state):
     print("---SUMMARIZING OLD CONVERSATION---")
-    history = state.get("history", [])
+    history = state.get("history", []) or []
     summary = state.get("summary", "")
-    
-    # We only summarize if history is getting long
+
+    # Only summarize if we have a longer history
     if len(history) <= 6:
-        return {"history": history, "summary": summary}
+        return {"summary": summary}
 
     llm = ChatOllama(model="llama3.2", temperature=0)
-    
-    # Take the oldest 4 messages to summarize, keep the latest 2 for immediate context
+
+    # We condense everything except the most recent 2 messages into the summary
     to_summarize = history[:-2]
-    remaining_history = history[-2:]
 
     prompt = f"""
-    You are the Senior Clerk for EthioGov AI. 
+    You are the Senior Clerk for EthioGov AI.
     Current Summary: {summary}
     New Messages to condense: {to_summarize}
-    
-    Update the summary to include the key legal topics and user intents 
-    discussed in the new messages. Keep it professional and concise.
+
+    Update the summary to include the key legal topics and user intents discussed in the new messages. Keep it professional and concise.
     Updated Summary:"""
 
     new_summary = llm.invoke(prompt).content
-    
-    # Return the new summary and the pruned history
-    return {"summary": new_summary, "history": remaining_history}
+    return {"summary": new_summary} 
 
 def contextualize_question(state):
     print("---REWRITING QUESTION FOR SEARCH---")
     question = state["question"]
-    history = state["history"]
-    
+    history = state.get("history", []) or []
+    summary = state.get("summary", "")
+
+    # No history present, nothing to contextualize
     if not history:
-        return {"question": question} # No history, no need to rewrite
+        return {"question": question}
 
     llm = ChatOllama(model="llama3.2", temperature=0)
-    
-    # Prompt to turn a follow-up into a standalone question
-    context_prompt = f"""Given the chat history and the latest user question, 
-    rephrase the question to be a standalone search query. 
-    History: {history}
+
+    # Use recent messages and summary to turn a follow-up into a standalone question
+    recent_messages = history[-6:]
+
+    context_prompt = f"""Given the chat history and the latest user question, rephrase the question to be a standalone search query.
+    Use the summary if present.
+
+    Summary: {summary}
+    Recent messages: {recent_messages}
     Follow-up: {question}
+
     Standalone Question:"""
-    
+
     standalone_q = llm.invoke(context_prompt).content
-    return {"question": standalone_q}
+    return {"question": standalone_q} 
 
 def generate(state):
     print("---GENERATING POLISHED LEGAL ANSWER---")
     question = state["question"]
     documents = state["documents"]
+    summary = state.get("summary", "")
     
     llm = ChatOllama(model="llama3.2", temperature=0, num_predict=2048,
         num_ctx=8192)
@@ -104,6 +108,12 @@ def generate(state):
         """You are the 'EthioGov AI' Senior Legal Consultant. Your objective is to provide 
         high-integrity, business-ready legal compliance summaries for investors and 
         government officials based ONLY on the provided context that includes the related proclamations with the proclamation number and title. 
+
+        CONTEXT SUMMARY:
+        {summary}
+
+        CONTEXT:
+        {context}
 
         CRITICAL BUSINESS RULES:
         1. AUTHORITY FIRST: Begin EVERY response with: "Per Proclamation No., Article [X]:"
@@ -115,9 +125,6 @@ def generate(state):
         4. PRECISION CITATION: Every claim ends with "[Proc. XXXX/YYYY, Art. X]"
         5. TONE: Authoritative consultant speaking to C-suite / government officials
 
-        CONTEXT:
-        {context}
-
         QUERY:
         {question}
 
@@ -125,7 +132,7 @@ def generate(state):
     )
     
     rag_chain = prompt | llm | StrOutputParser()
-    generation = rag_chain.invoke({"context": documents, "question": question})
+    generation = rag_chain.invoke({"context": documents, "question": question, "summary": summary})
     return {"generation": generation, "documents": documents, "question": question}
 
 def grade_documents(state):

@@ -64,23 +64,10 @@ function UserProfileDropdown() {
 }
 
 export default function DashboardPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      role: "user",
-      content:
-        "What are the key provisions of Proclamation 707/2011 regarding data protection?",
-    },
-    {
-      id: "2",
-      role: "assistant",
-      content:
-        "Proclamation 707/2011 establishes comprehensive data protection requirements for Ethiopian organizations. Key provisions include:\n\n1. **Data Collection**: Organizations must obtain explicit consent before collecting personal data\n2. **Data Security**: Mandatory security measures to protect against unauthorized access\n3. **Rights of Data Subjects**: Individuals have the right to access, correct, and delete their personal data\n4. **Cross-border Transfer**: Restrictions on transferring data outside Ethiopia without proper safeguards\n\nThese provisions align with international standards while addressing Ethiopia's specific regulatory needs.",
-      source: "Federal Negarit Gazeta No. 707/2011, Articles 3-7",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [summary, setSummary] = useState("");
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -109,8 +96,7 @@ export default function DashboardPage() {
       content: input,
     };
 
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
+    // Prepare the UI messages and 'thinking' placeholder in a single update
     const loadingId = `loading-${Date.now()}`;
     const loadingMessage: Message = {
       id: loadingId,
@@ -118,12 +104,22 @@ export default function DashboardPage() {
       content: "Thinking...",
       isLoading: true,
     };
-    setMessages((prev) => [...prev, loadingMessage]);
-    // keep local copy of input for request; use expected API shape
+
+    const nextMessages = [...messages, userMessage, loadingMessage];
+    setMessages(nextMessages);
+    setIsLoading(true);
+
+    // Build the history payload including recent messages (include the new user message and previous assistant replies)
+    const historyPayload = nextMessages
+      .filter((m) => !m.isLoading)
+      .slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    // keep local copy of input for request; include persisted summary if available
     const payload = {
       question: input,
-      history: [],
-      summary: "",
+      history: historyPayload,
+      summary: summary,
     };
     try {
       const res = await fetch("http://localhost:7860/query", {
@@ -161,6 +157,12 @@ export default function DashboardPage() {
                 }))
               : undefined,
           };
+
+          // Persist summary returned by the server (if any) so follow-ups can include it
+          if (data.summary && typeof data.summary === "string") {
+            setSummary(data.summary);
+          }
+
           setMessages((prev) =>
             prev.map((m) => (m.id === loadingId ? assistantMessage : m))
           );
